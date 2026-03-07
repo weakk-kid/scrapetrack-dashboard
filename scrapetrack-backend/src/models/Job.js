@@ -14,7 +14,7 @@ const jobSchema = new mongoose.Schema({
   result: {
     title: String,
     metaDescription: String,
-    links: [String]
+    paragraphs: [String]
   },
   error: {
     type: String,

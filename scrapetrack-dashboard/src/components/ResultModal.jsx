@@ -1,4 +1,4 @@
-import { X, FileText, Link2, AlignLeft, ExternalLink, CheckCircle2 } from "lucide-react";
+import { X, FileText, Link2, AlignLeft, ExternalLink, CheckCircle2, Download } from "lucide-react";
 import { useEffect } from "react";
 
 const ResultModal = ({ job, onClose }) => {
@@ -10,9 +10,31 @@ const ResultModal = ({ job, onClose }) => {
     return () => document.removeEventListener("keydown", handleEsc);
   }, [onClose]);
 
+  const handleDownload = () => {
+    const data = {
+      url: job.url,
+      title: job.result.title,
+      metaDescription: job.result.metaDescription,
+      paragraphs: job.result.paragraphs,
+      timestamp: new Date().toISOString(),
+      totalParagraphs: job.result.paragraphs?.length || 0
+    };
+
+    const jsonString = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `scrape-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   if (!job || !job.result) return null;
 
-  const { title, metaDescription, links } = job.result;
+  const { title, metaDescription, paragraphs } = job.result;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 backdrop-blur-md">
@@ -50,9 +72,9 @@ const ResultModal = ({ job, onClose }) => {
         </div>
 
         {/* Body */}
-        <div className="max-h-[60vh] overflow-y-auto p-6 space-y-4">
+        <div className="max-h-[60vh] overflow-y-auto p-6">
           {/* Title */}
-          <div className="group rounded-xl border border-border bg-muted/20 p-5 transition-all hover:border-primary/20">
+          <div className="group rounded-xl border border-border bg-muted/20 p-5 transition-all hover:border-primary/20 mb-4">
             <div className="mb-2 flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
                 <FileText className="h-3.5 w-3.5 text-primary" />
@@ -67,7 +89,7 @@ const ResultModal = ({ job, onClose }) => {
           </div>
 
           {/* Meta Description */}
-          <div className="group rounded-xl border border-border bg-muted/20 p-5 transition-all hover:border-primary/20">
+          <div className="group rounded-xl border border-border bg-muted/20 p-5 transition-all hover:border-primary/20 mb-4">
             <div className="mb-2 flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
                 <AlignLeft className="h-3.5 w-3.5 text-primary" />
@@ -81,45 +103,49 @@ const ResultModal = ({ job, onClose }) => {
             </p>
           </div>
 
-          {/* Links */}
-          <div className="group rounded-xl border border-border bg-muted/20 p-5 transition-all hover:border-primary/20">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
-                  <Link2 className="h-3.5 w-3.5 text-primary" />
-                </div>
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Extracted Links
-                </span>
+          {/* Paragraphs Section Header */}
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                <AlignLeft className="h-3.5 w-3.5 text-primary" />
               </div>
-              <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-                {links?.length || 0}
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Extracted Content
               </span>
             </div>
-            {links && links.length > 0 ? (
-              <ul className="max-h-48 space-y-1.5 overflow-y-auto">
-                {links.map((link, i) => (
-                  <li key={i}>
-                    <a
-                      href={link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group/link flex items-center gap-2 truncate rounded-lg px-3 py-2 font-mono text-xs text-primary transition-colors hover:bg-primary/10"
-                    >
-                      <span className="truncate flex-1">{link}</span>
-                      <ExternalLink className="h-3 w-3 opacity-0 group-hover/link:opacity-100 transition-opacity flex-shrink-0" />
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">No links extracted.</p>
-            )}
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+              {paragraphs?.length || 0}
+            </span>
           </div>
+
+          {/* Paragraphs Grid */}
+          {paragraphs && paragraphs.length > 0 ? (
+            <div className="space-y-3">
+              {paragraphs.map((para, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg border border-border/50 bg-background p-4 transition-all hover:border-primary/30 hover:bg-primary/5"
+                >
+                  <p className="text-sm leading-relaxed text-card-foreground break-words">
+                    {para}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No paragraphs extracted.</p>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex justify-end gap-3 border-t border-border bg-muted/20 px-6 py-4">
+          <button
+            onClick={handleDownload}
+            className="rounded-lg border border-primary/30 bg-primary/10 px-5 py-2.5 text-sm font-medium text-primary transition-all hover:bg-primary hover:text-primary-foreground hover:border-primary flex items-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            Download
+          </button>
           <button
             onClick={onClose}
             className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-accent hover:border-primary/30"

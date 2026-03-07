@@ -46,27 +46,18 @@ async function processJob(jobId) {
       $('meta[property="og:description"]').attr('content')?.trim() ||
       null;
 
-    // Extract all links
-    const links = [];
-    const baseUrl = new URL(job.url);
+    // Extract all paragraphs (filter out very short ones)
+    const paragraphs = [];
     
-    $('a[href]').each((_, element) => {
-      let href = $(element).attr('href');
-      
-      if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) {
-        return;
-      }
-
-      // Convert relative URLs to absolute
-      try {
-        const absoluteUrl = new URL(href, baseUrl.origin).href;
-        if (!links.includes(absoluteUrl)) {
-          links.push(absoluteUrl);
-        }
-      } catch {
-        // Skip invalid URLs
+    $('p').each((_, element) => {
+      const text = $(element).text().trim();
+      // Only include paragraphs with meaningful content (more than 20 chars)
+      if (text && text.length > 20) {
+        paragraphs.push(text);
       }
     });
+
+    console.log('📝 Extracted paragraphs:', paragraphs.length);
 
     // Update job with results
     await Job.findByIdAndUpdate(jobId, {
@@ -74,11 +65,11 @@ async function processJob(jobId) {
       result: {
         title,
         metaDescription,
-        links: links.slice(0, 100) // Limit to 100 links
+        paragraphs: paragraphs.slice(0, 100) // Limit to 100 paragraphs
       }
     });
 
-    console.log(`✅ Completed job: ${job._id} - Found ${links.length} links`);
+    console.log(`✅ Completed job: ${job._id} - Found ${paragraphs.length} paragraphs`);
 
   } catch (error) {
     console.error(`❌ Failed job ${jobId}:`, error.message);
