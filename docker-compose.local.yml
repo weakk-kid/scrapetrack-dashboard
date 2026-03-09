@@ -1,0 +1,127 @@
+# Docker Compose for LOCAL development with Redis & RabbitMQ running locally
+# Use this if you want to work offline without cloud services
+#
+# Usage: docker-compose -f docker-compose.local.yml up -d
+#
+# Update your .env file to use local services:
+#   REDIS_URL=redis://redis:6379
+#   RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+
+version: '3.8'
+
+services:
+  # ===================
+  # Redis (Local)
+  # ===================
+  redis:
+    image: redis:7-alpine
+    container_name: scrapetrack-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scrapetrack-network
+
+  # ===================
+  # RabbitMQ (Local)
+  # ===================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: scrapetrack-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scrapetrack-network
+
+  # ===================
+  # Backend API Server
+  # ===================
+  api:
+    build:
+      context: ./scrapetrack-backend
+      dockerfile: Dockerfile
+    container_name: scrapetrack-api
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - MONGODB_URI=${MONGODB_URI}
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - scrapetrack-network
+
+  # ===================
+  # Worker Process
+  # ===================
+  worker:
+    build:
+      context: ./scrapetrack-backend
+      dockerfile: Dockerfile
+    container_name: scrapetrack-worker
+    command: ["node", "src/worker.js"]
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=${MONGODB_URI}
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    restart: unless-stopped
+    depends_on:
+      - api
+    deploy:
+      replicas: 2
+    networks:
+      - scrapetrack-network
+
+  # ===================
+  # Frontend (React)
+  # ===================
+  frontend:
+    build:
+      context: ./scrapetrack-dashboard
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:3001/api
+    container_name: scrapetrack-frontend
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - scrapetrack-network
+
+volumes:
+  redis-data:
+  rabbitmq-data:
+
+networks:
+  scrapetrack-network:
+    driver: bridge
