@@ -1,7 +1,9 @@
-import { X, FileText, Link2, AlignLeft, ExternalLink, CheckCircle2, Download } from "lucide-react";
-import { useEffect } from "react";
+import { X, FileText, Link2, AlignLeft, ExternalLink, CheckCircle2, Download, Image } from "lucide-react";
+import { useEffect, useState } from "react";
 
 const ResultModal = ({ job, onClose }) => {
+  const [activeTab, setActiveTab] = useState('content');
+
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === "Escape") onClose();
@@ -16,8 +18,10 @@ const ResultModal = ({ job, onClose }) => {
       title: job.result.title,
       metaDescription: job.result.metaDescription,
       paragraphs: job.result.paragraphs,
+      images: job.result.images,
       timestamp: new Date().toISOString(),
-      totalParagraphs: job.result.paragraphs?.length || 0
+      totalParagraphs: job.result.paragraphs?.length || 0,
+      totalImages: job.result.images?.length || 0
     };
 
     const jsonString = JSON.stringify(data, null, 2);
@@ -34,7 +38,7 @@ const ResultModal = ({ job, onClose }) => {
 
   if (!job || !job.result) return null;
 
-  const { title, metaDescription, paragraphs } = job.result;
+  const { title, metaDescription, paragraphs, images } = job.result;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 backdrop-blur-md">
@@ -71,6 +75,38 @@ const ResultModal = ({ job, onClose }) => {
           </div>
         </div>
 
+        {/* Tabs */}
+        <div className="flex border-b border-border bg-muted/20 px-6">
+          <button
+            onClick={() => setActiveTab('content')}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              activeTab === 'content'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <AlignLeft className="h-4 w-4" />
+            Content
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs">
+              {paragraphs?.length || 0}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('images')}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              activeTab === 'images'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Image className="h-4 w-4" />
+            Images
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs">
+              {images?.length || 0}
+            </span>
+          </button>
+        </div>
+
         {/* Body */}
         <div className="max-h-[60vh] overflow-y-auto p-6">
           {/* Title */}
@@ -103,37 +139,99 @@ const ResultModal = ({ job, onClose }) => {
             </p>
           </div>
 
-          {/* Paragraphs Section Header */}
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
-                <AlignLeft className="h-3.5 w-3.5 text-primary" />
-              </div>
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Extracted Content
-              </span>
-            </div>
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-              {paragraphs?.length || 0}
-            </span>
-          </div>
-
-          {/* Paragraphs Grid */}
-          {paragraphs && paragraphs.length > 0 ? (
-            <div className="space-y-3">
-              {paragraphs.map((para, i) => (
-                <div
-                  key={i}
-                  className="rounded-lg border border-border/50 bg-background p-4 transition-all hover:border-primary/30 hover:bg-primary/5"
-                >
-                  <p className="text-sm leading-relaxed text-card-foreground break-words">
-                    {para}
-                  </p>
+          {/* Content Tab */}
+          {activeTab === 'content' && (
+            <>
+              {/* Paragraphs Section Header */}
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                    <AlignLeft className="h-3.5 w-3.5 text-primary" />
+                  </div>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Extracted Content
+                  </span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No paragraphs extracted.</p>
+                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                  {paragraphs?.length || 0}
+                </span>
+              </div>
+
+              {/* Paragraphs Grid */}
+              {paragraphs && paragraphs.length > 0 ? (
+                <div className="space-y-3">
+                  {paragraphs.map((para, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-border/50 bg-background p-4 transition-all hover:border-primary/30 hover:bg-primary/5"
+                    >
+                      <p className="text-sm leading-relaxed text-card-foreground break-words">
+                        {para}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No paragraphs extracted.</p>
+              )}
+            </>
+          )}
+
+          {/* Images Tab */}
+          {activeTab === 'images' && (
+            <>
+              {/* Images Section Header */}
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                    <Image className="h-3.5 w-3.5 text-primary" />
+                  </div>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Extracted Images
+                  </span>
+                </div>
+                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                  {images?.length || 0}
+                </span>
+              </div>
+
+              {/* Images Grid */}
+              {images && images.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {images.map((img, i) => (
+                    <div
+                      key={i}
+                      className="group relative rounded-lg border border-border/50 bg-background overflow-hidden transition-all hover:border-primary/30"
+                    >
+                      <a href={img.src} target="_blank" rel="noopener noreferrer">
+                        <img
+                          src={img.src}
+                          alt={img.alt || `Image ${i + 1}`}
+                          className="w-full h-32 object-cover transition-transform group-hover:scale-105"
+                          loading="lazy"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'flex';
+                          }}
+                        />
+                        <div className="hidden items-center justify-center h-32 bg-muted text-muted-foreground text-xs">
+                          Failed to load
+                        </div>
+                      </a>
+                      {img.alt && (
+                        <div className="p-2 border-t border-border/50">
+                          <p className="text-xs text-muted-foreground truncate" title={img.alt}>
+                            {img.alt}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No images found on this page.</p>
+              )}
+            </>
           )}
         </div>
 

@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_BASE = "http://localhost:5000/api";
+const API_BASE = "http://localhost:3001/api";
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -21,6 +21,11 @@ export const fetchJobs = async () => {
 
 export const fetchJobById = async (id) => {
   const response = await api.get(`/jobs/${id}`);
+  return response.data;
+};
+
+export const deleteJob = async (id) => {
+  const response = await api.delete(`/jobs/${id}`);
   return response.data;
 };
 

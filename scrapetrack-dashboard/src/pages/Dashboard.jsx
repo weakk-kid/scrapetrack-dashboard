@@ -3,7 +3,7 @@ import { Activity, CheckCircle2, Zap, Clock, TrendingUp, Sparkles } from "lucide
 import UrlInput from "../components/UrlInput";
 import JobTable from "../components/JobTable";
 import ResultModal from "../components/ResultModal";
-import { createJob, fetchJobs, fetchJobById } from "../services/api";
+import { createJob, fetchJobs, fetchJobById, deleteJob } from "../services/api";
 
 const POLL_INTERVAL = 3000;
 
@@ -50,6 +50,16 @@ const Dashboard = () => {
       setSelectedJob(fullJob);
     } catch {
       setSelectedJob(job);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      await deleteJob(id);
+      showToast("Job deleted successfully!");
+      await loadJobs();
+    } catch {
+      showToast("Failed to delete job.");
     }
   };
 
@@ -143,6 +153,7 @@ const Dashboard = () => {
             jobs={jobs}
             isLoading={isLoading}
             onViewResults={handleViewResults}
+            onDelete={handleDelete}
           />
         </div>
       </main>

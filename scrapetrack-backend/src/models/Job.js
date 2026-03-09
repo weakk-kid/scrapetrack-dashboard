@@ -14,7 +14,11 @@ const jobSchema = new mongoose.Schema({
   result: {
     title: String,
     metaDescription: String,
-    paragraphs: [String]
+    paragraphs: [String],
+    images: [{
+      src: String,
+      alt: String
+    }]
   },
   error: {
     type: String,

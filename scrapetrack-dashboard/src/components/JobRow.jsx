@@ -1,8 +1,8 @@
-import { Eye, ExternalLink, Copy, Check } from "lucide-react";
+import { Eye, ExternalLink, Copy, Check, Trash2 } from "lucide-react";
 import { useState } from "react";
 import StatusBadge from "./StatusBadge";
 
-const JobRow = ({ job, onViewResults, index }) => {
+const JobRow = ({ job, onViewResults, onDelete, index }) => {
   const [copied, setCopied] = useState(false);
   const formattedDate = new Date(job.createdAt).toLocaleString();
   
@@ -61,14 +61,23 @@ const JobRow = ({ job, onViewResults, index }) => {
         {formattedDate}
       </td>
       <td className="px-5 py-4">
-        <button
-          onClick={() => onViewResults(job)}
-          disabled={job.status !== "completed"}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3.5 py-2 text-xs font-medium text-foreground transition-all hover:bg-accent hover:border-primary/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:border-border"
-        >
-          <Eye className="h-3.5 w-3.5" />
-          <span>View</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onViewResults(job)}
+            disabled={job.status !== "completed"}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3.5 py-2 text-xs font-medium text-foreground transition-all hover:bg-accent hover:border-primary/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:border-border"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            <span>View</span>
+          </button>
+          <button
+            onClick={() => onDelete(job._id)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3.5 py-2 text-xs font-medium text-destructive transition-all hover:bg-destructive/10 hover:border-destructive/30"
+            title="Delete job"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </td>
     </tr>
   );

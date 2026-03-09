@@ -2,6 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const https = require('https');
 const Job = require('../models/Job');
+const redis = require('./redis');
 
 // Create axios instance that ignores SSL certificate errors
 const httpClient = axios.create({
@@ -23,6 +24,30 @@ async function processJob(jobId) {
     }
 
     console.log(`🔄 Processing job: ${job._id} - ${job.url}`);
+
+    // Update Redis with job status
+    await redis.setJobStatus(jobId, { status: 'running', url: job.url });
+
+    // Check cache first
+    const cachedResult = await redis.getCachedResult(job.url);
+    if (cachedResult) {
+      await Job.findByIdAndUpdate(jobId, {
+        status: 'completed',
+        result: cachedResult
+      });
+      await redis.setJobStatus(jobId, { status: 'completed', fromCache: true });
+      console.log(`✅ Completed job from cache: ${job._id}`);
+      return;
+    }
+
+    // Check rate limit for the domain
+    const domain = new URL(job.url).hostname;
+    const canProceed = await redis.checkRateLimit(domain, 10, 60); // 10 requests per minute per domain
+    
+    if (!canProceed) {
+      // Rate limited - requeue with delay (will be handled by the caller)
+      throw new Error(`Rate limited for domain: ${domain}. Please retry later.`);
+    }
 
     // Fetch the webpage
     const response = await httpClient.get(job.url, {
@@ -57,22 +82,58 @@ async function processJob(jobId) {
       }
     });
 
+    // Extract all images
+    const images = [];
+    const baseUrl = new URL(job.url);
+    
+    $('img').each((_, element) => {
+      let src = $(element).attr('src') || $(element).attr('data-src') || $(element).attr('data-lazy-src');
+      const alt = $(element).attr('alt')?.trim() || '';
+      
+      if (src) {
+        // Convert relative URLs to absolute
+        if (src.startsWith('//')) {
+          src = baseUrl.protocol + src;
+        } else if (src.startsWith('/')) {
+          src = baseUrl.origin + src;
+        } else if (!src.startsWith('http')) {
+          src = new URL(src, job.url).href;
+        }
+        
+        // Filter out tiny images (likely icons/trackers) and data URIs
+        if (!src.startsWith('data:') && !src.includes('1x1') && !src.includes('pixel')) {
+          images.push({ src, alt });
+        }
+      }
+    });
+
     console.log('📝 Extracted paragraphs:', paragraphs.length);
+    console.log('🖼️  Extracted images:', images.length);
+
+    const result = {
+      title,
+      metaDescription,
+      paragraphs: paragraphs.slice(0, 100), // Limit to 100 paragraphs
+      images: images.slice(0, 50) // Limit to 50 images
+    };
 
     // Update job with results
     await Job.findByIdAndUpdate(jobId, {
       status: 'completed',
-      result: {
-        title,
-        metaDescription,
-        paragraphs: paragraphs.slice(0, 100) // Limit to 100 paragraphs
-      }
+      result
     });
 
-    console.log(`✅ Completed job: ${job._id} - Found ${paragraphs.length} paragraphs`);
+    // Cache the result in Redis for 1 hour
+    await redis.cacheResult(job.url, result, 3600);
+    await redis.setJobStatus(jobId, { status: 'completed', fromCache: false });
+
+    console.log(`✅ Completed job: ${job._id} - Found ${paragraphs.length} paragraphs, ${images.length} images`);
 
   } catch (error) {
     console.error(`❌ Failed job ${jobId}:`, error.message);
+
+    // Update Redis status
+    await redis.setJobStatus(jobId, { status: 'failed', error: error.message });
 
     // Update job as failed
     await Job.findByIdAndUpdate(jobId, {

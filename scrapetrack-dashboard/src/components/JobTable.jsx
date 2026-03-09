@@ -1,7 +1,7 @@
 import { Loader2, Inbox, Search } from "lucide-react";
 import JobRow from "./JobRow";
 
-const JobTable = ({ jobs, isLoading, onViewResults }) => {
+const JobTable = ({ jobs, isLoading, onViewResults, onDelete }) => {
   if (isLoading && jobs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card p-20 shadow-sm">
@@ -53,7 +53,7 @@ const JobTable = ({ jobs, isLoading, onViewResults }) => {
           </thead>
           <tbody className="divide-y divide-border">
             {jobs.map((job, index) => (
-              <JobRow key={job._id} job={job} onViewResults={onViewResults} index={index} />
+              <JobRow key={job._id} job={job} onViewResults={onViewResults} onDelete={onDelete} index={index} />
             ))}
           </tbody>
         </table>
