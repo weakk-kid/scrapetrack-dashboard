@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const jobRoutes = require('./routes/jobs');
 const redis = require('./services/redis');
 const queue = require('./services/queue');
+const scraper = require('./services/scraper');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -59,6 +60,14 @@ async function start() {
 
     // Initialize RabbitMQ
     await queue.initQueue();
+
+    // Start worker (consume jobs in same process)
+    await queue.consumeJobs(async (message) => {
+      const { jobId } = message;
+      console.log(`\n🔧 Processing job: ${jobId}`);
+      await scraper.processJob(jobId);
+    });
+    console.log('👷 Worker started - processing jobs in-process');
 
     // Start server
     app.listen(PORT, () => {
