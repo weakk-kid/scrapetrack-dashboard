@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ===================
   # Backend API Server
@@ -14,9 +12,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - MONGODB_URI=${MONGODB_URI}
-      - REDIS_URL=${REDIS_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
     env_file:
       - ./scrapetrack-backend/.env
     restart: unless-stopped
@@ -36,21 +31,15 @@ services:
     build:
       context: ./scrapetrack-backend
       dockerfile: Dockerfile
-    container_name: scrapetrack-worker
     command: ["node", "src/worker.js"]
     environment:
       - NODE_ENV=production
-      - MONGODB_URI=${MONGODB_URI}
-      - REDIS_URL=${REDIS_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
     env_file:
       - ./scrapetrack-backend/.env
     restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy
-    deploy:
-      replicas: 2  # Run 2 workers for parallel processing
     networks:
       - scrapetrack-network
 

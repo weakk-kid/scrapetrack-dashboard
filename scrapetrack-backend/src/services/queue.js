@@ -1,11 +1,17 @@
 const amqp = require('amqplib');
 
 const QUEUE_NAME = 'scrape_jobs';
+const RECONNECT_DELAY_MS = 5000; // Start with 5 seconds
+const MAX_RECONNECT_DELAY_MS = 60000; // Max 60 seconds
+
 let connection = null;
 let channel = null;
+let isReconnecting = false;
+let currentReconnectDelay = RECONNECT_DELAY_MS;
+let consumerHandler = null; // Store handler for reconnection
 
 /**
- * Initialize RabbitMQ connection and channel
+ * Initialize RabbitMQ connection and channel with auto-reconnect
  */
 async function initQueue() {
   if (connection && channel) {
@@ -13,36 +19,107 @@ async function initQueue() {
   }
 
   try {
-    connection = await amqp.connect(process.env.RABBITMQ_URL);
+    // Add heartbeat to detect dead connections faster
+    const url = new URL(process.env.RABBITMQ_URL);
+    url.searchParams.set('heartbeat', '30'); // 30 second heartbeat
+    
+    connection = await amqp.connect(url.toString());
     channel = await connection.createChannel();
     
     // Ensure queue exists with durability
     await channel.assertQueue(QUEUE_NAME, {
-      durable: true, // Queue survives broker restart
+      durable: true,
     });
 
-    // Prefetch 1 message at a time for fair distribution among workers
+    // Prefetch 1 message at a time for fair distribution
     await channel.prefetch(1);
 
     console.log('🐰 Connected to RabbitMQ (CloudAMQP)');
     
+    // Reset reconnect delay on successful connection
+    currentReconnectDelay = RECONNECT_DELAY_MS;
+    isReconnecting = false;
+
+    // Handle connection errors
     connection.on('error', (err) => {
       console.error('RabbitMQ connection error:', err.message);
-      connection = null;
-      channel = null;
+      handleDisconnect();
     });
 
+    // Handle connection close
     connection.on('close', () => {
       console.log('RabbitMQ connection closed');
-      connection = null;
+      handleDisconnect();
+    });
+
+    // Handle channel errors
+    channel.on('error', (err) => {
+      console.error('RabbitMQ channel error:', err.message);
+    });
+
+    channel.on('close', () => {
+      console.log('RabbitMQ channel closed');
       channel = null;
     });
 
     return { connection, channel };
   } catch (error) {
     console.error('Failed to connect to RabbitMQ:', error.message);
+    connection = null;
+    channel = null;
     throw error;
   }
+}
+
+/**
+ * Handle disconnection and trigger reconnection
+ */
+function handleDisconnect() {
+  connection = null;
+  channel = null;
+  
+  if (!isReconnecting) {
+    scheduleReconnect();
+  }
+}
+
+/**
+ * Schedule a reconnection attempt with exponential backoff
+ */
+function scheduleReconnect() {
+  if (isReconnecting) return;
+  
+  isReconnecting = true;
+  
+  console.log(`🔄 Reconnecting to RabbitMQ in ${currentReconnectDelay / 1000}s...`);
+  
+  setTimeout(async () => {
+    try {
+      await initQueue();
+      
+      // Re-register consumer if we had one
+      if (consumerHandler) {
+        console.log('🔄 Re-registering job consumer...');
+        await consumeJobs(consumerHandler);
+      }
+      
+      console.log('✅ Reconnected to RabbitMQ successfully');
+    } catch (error) {
+      console.error('❌ Reconnection failed:', error.message);
+      
+      // Exponential backoff (double the delay, up to max)
+      currentReconnectDelay = Math.min(currentReconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+      isReconnecting = false;
+      scheduleReconnect();
+    }
+  }, currentReconnectDelay);
+}
+
+/**
+ * Check if connected to RabbitMQ
+ */
+function isConnected() {
+  return connection !== null && channel !== null;
 }
 
 /**
@@ -62,7 +139,7 @@ async function publishJob(jobId, options = {}) {
   });
 
   channel.sendToQueue(QUEUE_NAME, Buffer.from(message), {
-    persistent: true, // Message survives broker restart
+    persistent: true,
     priority: options.priority || 0
   });
 
@@ -74,6 +151,9 @@ async function publishJob(jobId, options = {}) {
  * @param {function} handler - Async function to process each job
  */
 async function consumeJobs(handler) {
+  // Store handler for reconnection
+  consumerHandler = handler;
+  
   if (!channel) {
     await initQueue();
   }
@@ -88,18 +168,16 @@ async function consumeJobs(handler) {
 
     try {
       await handler(content);
-      channel.ack(msg); // Acknowledge successful processing
+      channel.ack(msg);
       console.log(`✅ Job completed and acknowledged: ${content.jobId}`);
     } catch (error) {
       console.error(`❌ Job failed: ${content.jobId}`, error.message);
       
-      // Reject and requeue if it hasn't been redelivered too many times
-      // This prevents infinite loops for permanently failing jobs
       if (!msg.fields.redelivered) {
-        channel.nack(msg, false, true); // Requeue
+        channel.nack(msg, false, true);
         console.log(`🔄 Job requeued: ${content.jobId}`);
       } else {
-        channel.nack(msg, false, false); // Don't requeue (send to DLQ if configured)
+        channel.nack(msg, false, false);
         console.log(`☠️ Job moved to dead letter: ${content.jobId}`);
       }
     }
@@ -126,6 +204,9 @@ async function getQueueStats() {
  * Close RabbitMQ connection
  */
 async function closeQueue() {
+  consumerHandler = null;
+  isReconnecting = false;
+  
   if (channel) {
     await channel.close();
     channel = null;
@@ -143,5 +224,6 @@ module.exports = {
   consumeJobs,
   getQueueStats,
   closeQueue,
+  isConnected,
   QUEUE_NAME
 };
