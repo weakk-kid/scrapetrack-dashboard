@@ -1,5 +1,9 @@
 # ScrapeTrack
 
+**Live Demo:**
+- Frontend: https://scrapetrack-dashboard.vercel.app/
+- Backend API: https://scrapetrack-dashboard.onrender.com
+
 A distributed web scraping platform with React frontend, Express.js backend, Redis caching, and RabbitMQ job queue.
 
 ## Architecture
@@ -41,10 +45,16 @@ docker-compose up -d
 docker-compose -f docker-compose.local.yml up -d
 ```
 
+
+**For local development:**
 Services will be available at:
 - **Frontend**: http://localhost
 - **API**: http://localhost:3001
 - **RabbitMQ UI** (local only): http://localhost:15672
+
+**For production/hosted deployment, use:**
+- **Frontend**: https://scrapetrack-dashboard.vercel.app/
+- **API**: https://scrapetrack-dashboard.onrender.com
 
 ### Option 2: Manual Setup
 
