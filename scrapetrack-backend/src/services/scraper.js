@@ -55,10 +55,56 @@ async function processJob(jobId) {
     let html;
     let usedPuppeteer = false;
     try {
-      // Try Puppeteer-extra with stealth plugin for sites that block bots
-      const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+      // Launch Puppeteer-extra with stealth plugin and realistic browser args
+      const browser = await puppeteer.launch({
+        headless: 'new',
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-infobars',
+          '--window-size=1920,1080',
+          '--start-maximized',
+          '--disable-dev-shm-usage',
+          '--lang=en-US,en',
+        ],
+      });
       const page = await browser.newPage();
-      await page.goto(job.url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      // Set realistic viewport and user-agent
+      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+      );
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+      });
+
+      // Navigate and wait for content to load
+      await page.goto(job.url, { waitUntil: 'networkidle2', timeout: 45000 });
+
+      // Small random delay to mimic human behavior
+      await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+
+      // Scroll down to trigger lazy-loaded content
+      await page.evaluate(async () => {
+        await new Promise(resolve => {
+          let totalHeight = 0;
+          const distance = 300;
+          const timer = setInterval(() => {
+            window.scrollBy(0, distance);
+            totalHeight += distance;
+            if (totalHeight >= document.body.scrollHeight) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 100);
+        });
+      });
+
+      // Wait a bit after scrolling for lazy content
+      await new Promise(r => setTimeout(r, 1500));
+
       html = await page.content();
       await browser.close();
       usedPuppeteer = true;
@@ -67,7 +113,7 @@ async function processJob(jobId) {
       // Fallback to axios if Puppeteer fails
       const response = await httpClient.get(job.url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.5',
         },
@@ -82,26 +128,53 @@ async function processJob(jobId) {
 
     // Extract data
     const title = $('title').text().trim() || null;
-    
-    const metaDescription = 
+
+    const metaDescription =
       $('meta[name="description"]').attr('content')?.trim() ||
       $('meta[property="og:description"]').attr('content')?.trim() ||
       null;
 
-    // Extract all paragraphs (filter out very short ones)
-    const paragraphs = [];
-    
-    $('p').each((_, element) => {
+    // Extract headings
+    const headings = [];
+    $('h1, h2, h3, h4, h5, h6').each((_, element) => {
       const text = $(element).text().trim();
-      // Only include paragraphs with meaningful content (more than 20 chars)
-      if (text && text.length > 20) {
+      const tag = $(element).prop('tagName').toLowerCase();
+      if (text && text.length > 2) {
+        headings.push({ tag, text });
+      }
+    });
+
+    // Extract text content from all meaningful elements
+    const paragraphs = [];
+    const seen = new Set();
+
+    $('p, article, section > div, li, td, th, blockquote, figcaption, dd, dt').each((_, element) => {
+      const text = $(element).text().trim();
+      // Only include content with meaningful text (more than 20 chars) and deduplicate
+      if (text && text.length > 20 && !seen.has(text)) {
+        seen.add(text);
         paragraphs.push(text);
+      }
+    });
+
+    // Base URL for resolving relative paths
+    const baseUrl = new URL(job.url);
+
+    // Extract links
+    const links = [];
+    $('a[href]').each((_, element) => {
+      const href = $(element).attr('href');
+      const text = $(element).text().trim();
+      if (href && text && !href.startsWith('#') && !href.startsWith('javascript:')) {
+        let url = href;
+        if (url.startsWith('/')) url = baseUrl.origin + url;
+        else if (!url.startsWith('http')) url = new URL(url, job.url).href;
+        links.push({ url, text });
       }
     });
 
     // Extract all images
     const images = [];
-    const baseUrl = new URL(job.url);
     
     $('img').each((_, element) => {
       let src = $(element).attr('src') || $(element).attr('data-src') || $(element).attr('data-lazy-src');
@@ -124,7 +197,9 @@ async function processJob(jobId) {
       }
     });
 
-    console.log('📝 Extracted paragraphs:', paragraphs.length);
+    console.log('📝 Extracted headings:', headings.length);
+    console.log('📝 Extracted text blocks:', paragraphs.length);
+    console.log('🔗 Extracted links:', links.length);
     console.log('🖼️  Extracted images:', images.length);
     if (usedPuppeteer) {
       console.log('✅ Used Puppeteer for scraping');
@@ -133,8 +208,10 @@ async function processJob(jobId) {
     const result = {
       title,
       metaDescription,
-      paragraphs: paragraphs.slice(0, 100), // Limit to 100 paragraphs
-      images: images.slice(0, 50) // Limit to 50 images
+      headings: headings.slice(0, 50),
+      paragraphs: paragraphs.slice(0, 100),
+      links: links.slice(0, 200),
+      images: images.slice(0, 50)
     };
 
     // Update job with results
