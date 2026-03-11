@@ -12,13 +12,8 @@ const jobSchema = new mongoose.Schema({
     default: 'pending'
   },
   result: {
-    title: String,
-    metaDescription: String,
-    paragraphs: [String],
-    images: [{
-      src: String,
-      alt: String
-    }]
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
   },
   error: {
     type: String,

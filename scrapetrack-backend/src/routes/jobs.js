@@ -3,6 +3,7 @@ const router = express.Router();
 const Job = require('../models/Job');
 const queue = require('../services/queue');
 const redis = require('../services/redis');
+const scraper = require('../services/scraper');
 
 // POST /api/jobs - Create a new scraping job
 router.post('/', async (req, res) => {
@@ -23,13 +24,15 @@ router.post('/', async (req, res) => {
     // Create job in pending state
     const job = await Job.create({ url, status: 'pending' });
 
-    // Publish to RabbitMQ queue instead of processing directly
-    await queue.publishJob(job._id.toString(), { priority: priority || 0 });
-
     // Set initial status in Redis for fast polling
     await redis.setJobStatus(job._id.toString(), { status: 'pending', url });
 
     res.status(201).json(job);
+
+    // Process job directly (don't rely solely on RabbitMQ consumer)
+    scraper.processJob(job._id.toString()).catch(err => {
+      console.error('Direct processing failed:', err.message);
+    });
   } catch (error) {
     console.error('Error creating job:', error);
     res.status(500).json({ error: 'Failed to create job' });

@@ -31,9 +31,9 @@ async function processJob(jobId) {
     // Update Redis with job status
     await redis.setJobStatus(jobId, { status: 'running', url: job.url });
 
-    // Check cache first
+    // Check cache first (only use if it has the new elements format)
     const cachedResult = await redis.getCachedResult(job.url);
-    if (cachedResult) {
+    if (cachedResult && cachedResult.elements) {
       await Job.findByIdAndUpdate(jobId, {
         status: 'completed',
         result: cachedResult
@@ -125,106 +125,142 @@ async function processJob(jobId) {
 
     // Parse HTML with Cheerio
     const $ = cheerio.load(html);
+    const baseUrl = new URL(job.url);
+
+    // Skip non-visible / structural tags
+    const skipTags = new Set([
+      'html', 'head', 'body', 'script', 'style', 'noscript', 'link',
+      'meta', 'br', 'hr', 'wbr', 'col', 'colgroup', 'source', 'track',
+      'param', 'area', 'base', 'embed', 'object', 'template', 'slot',
+      'svg', 'path', 'g', 'defs', 'clippath', 'circle', 'rect', 'line',
+      'polygon', 'polyline', 'ellipse', 'use', 'symbol', 'lineargradient',
+      'radialgradient', 'stop', 'filter', 'mask', 'pattern', 'title',
+    ]);
 
     // Extract data
-    const title = $('title').text().trim() || null;
+    const pageTitle = $('title').text().trim() || null;
 
     const metaDescription =
       $('meta[name="description"]').attr('content')?.trim() ||
       $('meta[property="og:description"]').attr('content')?.trim() ||
       null;
 
-    // Extract headings
-    const headings = [];
-    $('h1, h2, h3, h4, h5, h6').each((_, element) => {
-      const text = $(element).text().trim();
-      const tag = $(element).prop('tagName').toLowerCase();
-      if (text && text.length > 2) {
-        headings.push({ tag, text });
-      }
-    });
-
-    // Extract text content from all meaningful elements
-    const paragraphs = [];
+    // Extract ALL elements grouped by tag
+    const elements = {};
     const seen = new Set();
 
-    $('p, article, section > div, li, td, th, blockquote, figcaption, dd, dt').each((_, element) => {
-      const text = $(element).text().trim();
-      // Only include content with meaningful text (more than 20 chars) and deduplicate
-      if (text && text.length > 20 && !seen.has(text)) {
-        seen.add(text);
-        paragraphs.push(text);
-      }
-    });
+    $('body *').each((_, el) => {
+      const tag = $(el).prop('tagName')?.toLowerCase();
+      if (!tag || skipTags.has(tag)) return;
 
-    // Base URL for resolving relative paths
-    const baseUrl = new URL(job.url);
+      const entry = {};
 
-    // Extract links
-    const links = [];
-    $('a[href]').each((_, element) => {
-      const href = $(element).attr('href');
-      const text = $(element).text().trim();
-      if (href && text && !href.startsWith('#') && !href.startsWith('javascript:')) {
+      // Get direct text (not children's text) for leaf-like content
+      const ownText = $(el).contents().filter(function () {
+        return this.type === 'text';
+      }).text().trim();
+      const fullText = $(el).text().trim();
+      const text = ownText.length > 5 ? ownText : fullText;
+
+      // Tag-specific attribute extraction
+      if (tag === 'a') {
+        const href = $(el).attr('href');
+        if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
         let url = href;
-        if (url.startsWith('/')) url = baseUrl.origin + url;
-        else if (!url.startsWith('http')) url = new URL(url, job.url).href;
-        links.push({ url, text });
+        if (url.startsWith('//')) url = baseUrl.protocol + url;
+        else if (url.startsWith('/')) url = baseUrl.origin + url;
+        else if (!url.startsWith('http')) try { url = new URL(url, job.url).href; } catch { return; }
+        entry.href = url;
+        if (text) entry.text = text;
+      } else if (tag === 'img') {
+        let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src');
+        if (!src || src.startsWith('data:')) return;
+        if (src.startsWith('//')) src = baseUrl.protocol + src;
+        else if (src.startsWith('/')) src = baseUrl.origin + src;
+        else if (!src.startsWith('http')) try { src = new URL(src, job.url).href; } catch { return; }
+        entry.src = src;
+        const alt = $(el).attr('alt')?.trim();
+        if (alt) entry.alt = alt;
+      } else if (tag === 'video' || tag === 'audio') {
+        const src = $(el).attr('src') || $(el).find('source').first().attr('src');
+        if (src) entry.src = src;
+        if (!src && !text) return;
+        if (text) entry.text = text;
+      } else if (tag === 'iframe') {
+        const src = $(el).attr('src');
+        if (src) entry.src = src;
+        else return;
+      } else if (tag === 'input' || tag === 'select' || tag === 'textarea') {
+        const type = $(el).attr('type');
+        const name = $(el).attr('name');
+        const placeholder = $(el).attr('placeholder');
+        if (type) entry.type = type;
+        if (name) entry.name = name;
+        if (placeholder) entry.placeholder = placeholder;
+        if (!type && !name && !placeholder) return;
+      } else if (tag === 'form') {
+        const action = $(el).attr('action');
+        const method = $(el).attr('method');
+        if (action) entry.action = action;
+        if (method) entry.method = method;
+        if (!action && !method) return;
+      } else if (tag === 'table') {
+        // Extract table as rows of cells
+        const rows = [];
+        $(el).find('tr').each((_, tr) => {
+          const cells = [];
+          $(tr).find('td, th').each((_, cell) => {
+            cells.push($(cell).text().trim());
+          });
+          if (cells.length > 0) rows.push(cells);
+        });
+        if (rows.length > 0) entry.rows = rows.slice(0, 100);
+        else return;
+      } else {
+        // All other tags — extract text content
+        if (!text || text.length < 2) return;
+        entry.text = text;
       }
+
+      // Deduplicate by stringified entry
+      const key = JSON.stringify(entry);
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      if (!elements[tag]) elements[tag] = [];
+      elements[tag].push(entry);
     });
 
-    // Extract all images
-    const images = [];
-    
-    $('img').each((_, element) => {
-      let src = $(element).attr('src') || $(element).attr('data-src') || $(element).attr('data-lazy-src');
-      const alt = $(element).attr('alt')?.trim() || '';
-      
-      if (src) {
-        // Convert relative URLs to absolute
-        if (src.startsWith('//')) {
-          src = baseUrl.protocol + src;
-        } else if (src.startsWith('/')) {
-          src = baseUrl.origin + src;
-        } else if (!src.startsWith('http')) {
-          src = new URL(src, job.url).href;
-        }
-        
-        // Filter out tiny images (likely icons/trackers) and data URIs
-        if (!src.startsWith('data:') && !src.includes('1x1') && !src.includes('pixel')) {
-          images.push({ src, alt });
-        }
-      }
-    });
+    // Count totals
+    let totalElements = 0;
+    for (const tag in elements) {
+      totalElements += elements[tag].length;
+    }
 
-    console.log('📝 Extracted headings:', headings.length);
-    console.log('📝 Extracted text blocks:', paragraphs.length);
-    console.log('🔗 Extracted links:', links.length);
-    console.log('🖼️  Extracted images:', images.length);
+    console.log(`📝 Extracted ${totalElements} elements across ${Object.keys(elements).length} tag types`);
     if (usedPuppeteer) {
       console.log('✅ Used Puppeteer for scraping');
     }
 
     const result = {
-      title,
+      title: pageTitle,
       metaDescription,
-      headings: headings.slice(0, 50),
-      paragraphs: paragraphs.slice(0, 100),
-      links: links.slice(0, 200),
-      images: images.slice(0, 50)
+      elements,
+      totalElements,
+      tagTypes: Object.keys(elements),
     };
 
-    // Update job with results
-    await Job.findByIdAndUpdate(jobId, {
-      status: 'completed',
-      result
-    });
+    // Update job with results (use native MongoDB update to preserve Mixed type fields)
+    await Job.collection.updateOne(
+      { _id: job._id },
+      { $set: { status: 'completed', result } }
+    );
 
     // Cache the result in Redis for 1 hour
     await redis.cacheResult(job.url, result, 3600);
     await redis.setJobStatus(jobId, { status: 'completed', fromCache: false });
 
-    console.log(`✅ Completed job: ${job._id} - Found ${paragraphs.length} paragraphs, ${images.length} images`);
+    console.log(`✅ Completed job: ${job._id} - ${totalElements} elements across ${Object.keys(elements).length} tags`);
 
   } catch (error) {
     console.error(`❌ Failed job ${jobId}:`, error.message);
