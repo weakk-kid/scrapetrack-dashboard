@@ -3,6 +3,9 @@ const cheerio = require('cheerio');
 const https = require('https');
 const Job = require('../models/Job');
 const redis = require('./redis');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 
 // Create axios instance that ignores SSL certificate errors
 const httpClient = axios.create({
@@ -49,19 +52,33 @@ async function processJob(jobId) {
       throw new Error(`Rate limited for domain: ${domain}. Please retry later.`);
     }
 
-    // Fetch the webpage
-    const response = await httpClient.get(job.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      },
-      timeout: 30000, // 30 second timeout
-      maxRedirects: 5
-    });
+    let html;
+    let usedPuppeteer = false;
+    try {
+      // Try Puppeteer-extra with stealth plugin for sites that block bots
+      const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+      const page = await browser.newPage();
+      await page.goto(job.url, { waitUntil: 'networkidle2', timeout: 30000 });
+      html = await page.content();
+      await browser.close();
+      usedPuppeteer = true;
+    } catch (err) {
+      console.warn('Puppeteer-extra failed, falling back to axios:', err.message);
+      // Fallback to axios if Puppeteer fails
+      const response = await httpClient.get(job.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+        },
+        timeout: 30000,
+        maxRedirects: 5
+      });
+      html = response.data;
+    }
 
     // Parse HTML with Cheerio
-    const $ = cheerio.load(response.data);
+    const $ = cheerio.load(html);
 
     // Extract data
     const title = $('title').text().trim() || null;
@@ -109,6 +126,9 @@ async function processJob(jobId) {
 
     console.log('📝 Extracted paragraphs:', paragraphs.length);
     console.log('🖼️  Extracted images:', images.length);
+    if (usedPuppeteer) {
+      console.log('✅ Used Puppeteer for scraping');
+    }
 
     const result = {
       title,
